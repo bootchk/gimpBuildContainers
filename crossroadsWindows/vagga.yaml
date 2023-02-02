@@ -1,0 +1,237 @@
+# Vagga script to build latest GIMP (2.99)
+
+# using crossroads tool to cross compile to Windows
+
+# a stack of containers, to reduce rebuild
+
+containers:
+
+  # OS with dev (compiling)
+  osContainer:
+    setup:
+    - !Ubuntu jammy
+    
+    # tools for dev (C compiler)
+    - !Install [build-essential]
+    - !Install [gdb]
+
+    # enable universe repository (where meson found)
+    - !UbuntuUniverse
+
+    # use meson instead of automake
+    - !Install [meson]
+    # meson uses pkg-config
+    - !Install [pkg-config]
+    
+    # needed to install crossroad when using Py3Install
+    # rst2man
+    - !Install [python3-docutils]
+
+    # needed to install crossroad from git clone
+    - !Install [git]
+    - !Install [python3-pip]
+
+    # needed for crossroad to unarchive
+    - !Install [cpio]
+    - !Install [rpm2cpio]
+
+    # xsltproc needed by gimp build
+    - !Install [xsltproc]
+    
+
+  # with crossroad tool
+  crossroadContainer:
+    setup:
+    - !Container osContainer
+
+    # This has issues with the pip-install directory disappearing
+    # and later CROSSROADS-PLATFORM is not in the env.
+    # So don't install using pip3
+    # - !Py3Install [crossroad]
+
+    # Instead install from a repo using setup.py
+    - !Sh |
+        cd /work
+        rm -rf crossroad
+        git clone git://git.tuxfamily.org/gitroot/crossroad/crossroad.git
+        cd crossroad
+        pip3 install -r requirements.txt
+        ./setup.py build && ./setup.py install
+
+  
+  # with cross for win64
+  crossW64Container:
+    setup:
+    - !Container crossroadContainer
+
+    # needed to cross compile to windows
+    - !Install [gcc-mingw-w64-x86-64]
+    - !Install [binutils-mingw-w64-x86-64]
+    - !Install [mingw-w64]
+
+    # Build time dependency
+    # Not cross compiled, but headers or tools needed at compile time
+    - !Install [libglib2.0-dev]
+    - !Install [librsvg2-dev]
+
+    # i18n, else /data/tags/meson.build crashes
+    - !Install [gettext]
+
+    # zsh work better than bash?
+    - !Install [zsh]
+
+    # Git source for dependencies
+    # Put it outside the container, so we might edit it
+    - !Sh |
+        cd /work
+        # babl
+        rm -rf babl
+        git clone https://gitlab.gnome.org/GNOME/babl.git
+        # gegl
+        rm -rf gegl
+        git clone https://gitlab.gnome.org/GNOME/gegl.git
+
+    # Tar gegl because latest in gegl repo fails to compile
+    #- !Tar
+    #  url: https://download.gimp.org/pub/gegl/0.4/gegl-0.4.40.tar.xz
+    #  path: /work
+
+    # patch gegl for invalid cast
+    - !Sh |
+        cd /work
+        patch gegl/gegl/gegl-op.h gegl.patch
+    
+    # tell crossroad to verify can compile to w64
+    - !Sh |
+        crossroad -h w64
+
+    # Larger /tmp  100Mi is default, not enough for cross compile?
+    volumes:
+      /tmp: !Tmpfs { size: 500Mi, mode: 0o1777 }
+
+    environ:
+      HOME: /work/.home
+      SHELL: zsh
+
+commands:
+
+  # run is the conventional name for the primary vagga command.
+  # Here "run" means just build gimp for w64
+  # write-mode allows the container to be written
+  run: !Command
+    description: cross compile gimp for Win64
+    container:   crossW64Container
+    write-mode: transient-hard-link-copy
+    run: |
+      # Enter the crossroad environment.
+      # Note name of project not conflict with name of repo for gimp app
+      crossroad --verbose w64 gimp-build << EOF
+
+      # We shouldn't need this, but do
+      # When crossroad python spawns zsh, .zshrc does not get sourced
+      source /usr/local/share/crossroad/scripts/shells/zsh.w64/.zshrc
+
+      # Show the the env is set up for cross compile using crossroad
+      echo "lkk env"
+      env
+
+      # ???
+      crossroad source msys2
+
+      echo " "
+      echo "crossroad install dependencies"
+      crossroad install appstream-glib atk cairo cairo drmingw gexiv2 glib2 graphviz json-c ghostscript iso-codes json-glib libheif lcms2 libjxl
+      crossroad install libmypaint mypaint-brushes libwebp libwmf openexr poppler 
+      # poppler-dataxpm-nox
+
+      echo "build babl"
+      cd babl
+      # build tree is up from source tree
+      crossroad meson ../buildBabl
+      # build in the build tree
+      cd ../buildBabl
+      ninja && ninja install
+      cd ..
+
+      echo "build gegl"
+      cd gegl
+      # build tree is up from source tree
+      crossroad meson ../buildGegl
+      # build in the build tree
+      cd ../buildGegl
+      ninja -j 8 && ninja install
+      cd ..
+
+      echo " "
+      echo "build gimp"
+      cd gimp
+      crossroad meson ../buildGimp
+      cd ../buildGimp
+      ninja -j 8 && ninja install
+      cd ..
+
+      echo " "
+      echo "Zip gimp"
+      crossroad --compress=gimp-build.zip w64 gimp-build
+
+      crossroad --help
+
+      EOF
+
+  run2: !Command
+    description: partial (only gimp) cross compile gimp for Win64
+    container:   crossW64Container
+    write-mode: transient-hard-link-copy
+    run:  |
+      # Enter the crossroad environment.
+      # Note name of project not conflict with name of repo for gimp app
+      crossroad --verbose w64 gimp-build << EOF
+
+      # We shouldn't need this, but do
+      # When crossroad python spawns zsh, .zshrc does not get sourced
+      source /usr/local/share/crossroad/scripts/shells/zsh.w64/.zshrc
+
+      crossroad source msys2
+
+      echo " "
+      echo "assuming already crossroad install dependencies"
+      echo "assuming already built babl and gegl"
+      echo " "
+      echo "build gimp"
+      cd gimp
+      crossroad meson ../buildGimp
+      cd ../buildGimp
+      ninja --verbose && ninja install
+      cd ..
+
+      EOF
+
+  sanity: !Command
+    description: test sanity for crossroad dev
+    container:   crossW64Container
+    write-mode: transient-hard-link-copy
+    run: |
+      echo "pkg-config installed?"
+      which pkg-config
+      echo "bash installed?"
+      which bash
+      echo "shell in use?"
+      ps -p $$
+      echo "value of $SHELL"
+      echo $SHELL
+
+
+  sanity2: !Command
+    description: test sanity for crossroad dev
+    container:   crossW64Container
+    write-mode: transient-hard-link-copy
+    run: ps -ef
+
+  sanityOS: !Command
+    description: test sanity of baseOS container
+    container:   osContainer
+    run: |
+      echo "which python3"
+      which python3
+      echo "which pip3"
+      which pip3

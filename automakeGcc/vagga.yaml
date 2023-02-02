@@ -1,0 +1,356 @@
+# Vagga script to build Gimp using automake and gcc
+
+containers:
+
+  # basic OS with dev (compiling)
+  baseOS:
+    setup:
+    - !Ubuntu jammy
+    
+    # tools for dev (C compiler)
+    - !Install [build-essential]
+    - !Install [gdb]
+
+
+
+
+  # with required build tools
+  # Some tools are for optional build: meson, clang
+  baseWithTools:
+    setup:
+    - !Container baseOS
+    
+    # Enable universe repo, where many packages live
+    - !UbuntuUniverse
+    
+    # Needed to install meson using pip3
+    #- !Install [ca-certificates]
+    #- !Install [python3-pip]
+    #- !Sh pip3 install meson
+
+    # GIMP build needs setuptools
+    - !Install [python3-setuptools]
+
+    # meson is a python3 app
+    # Install packaged version, which might be too old.
+    # Alternatively, get latest using pip
+    
+    - !Install [meson]
+
+    # clang versus gcc
+    - !Install [clang]
+    # gnu ld vs llvm's lld (installs as ld.lld)
+    - !Install [lld]
+
+    # meson and autotools use pkg-config
+    - !Install [pkg-config]
+
+    # meson.build calls git
+    - !Install [git]
+
+    # meson will use cmake if available?
+    - !Install [cmake]
+
+    # build uses gobject introspection tools
+    - !Install [gobject-introspection]
+
+    # more tools
+    - !Install [ xsltproc]
+
+    # tool to build API docs
+    - !Install [gtk-doc-tools]
+
+    # specific to autotools build
+    - !Install [libtool]
+
+    # in8n internationalization
+    - !Install [intltool]
+
+    # New required tool for Gimp gettext stuff, June 2022
+    - !Install [ autopoint ]
+
+    # Packaged valgrind is 3.18, need later for clang14
+    # - !Install [ valgrind ]
+
+    # Install valgrind latest
+    - !TarInstall
+      url: https://sourceware.org/pub/valgrind/valgrind-3.20.0.tar.bz2
+
+    # Install libc w debug for valgrind
+    - !Install [libc6-dbg]
+
+
+
+  # with libraries required by gegl, babl, gimp (and other things we build)
+
+  # these are package names, might depend on distribution
+  # e.g. package names are different in alpine
+
+  gimpDeps:
+    setup:
+    - !Container baseWithTools
+
+    # babl, gegl, GIMP uses glib group of libraries
+    # package comprises glib, gobject, and gio
+    - !Install [glib2.0-dev]
+
+    # the builds deposit introspection data
+    # If omit, get can't find ...gir... when building gegl
+    - !Install [libgirepository1.0-dev]
+
+    # babl specific
+
+    # links against lcms2 (lite color mgt system) library, need the dev flavor
+    - !Install [liblcms2-dev]
+
+    # gegl specific
+
+    # depends on babl (which we build), and these libraries from packages
+    - !Install [libjson-glib-dev]
+
+    # gimp specific
+    # Somewhat in reverse order of complain by build
+
+    # interpreters
+    # Python3 PyGObject.  See earlier, installed Python3
+    - !Install [ python3-gi]
+    # lua
+    - !Install [ luajit]
+    - !Install [ lua-lgi ]
+    # javascript
+    - !Install [ gjs]
+
+    # plugins, mainly file format plugins?
+    # JPEG format
+    - !Install [ libjpeg-dev]
+    # TIFF format
+    - !Install [ libtiff-dev]
+    # PDF format
+    - !Install [ libpoppler-glib-dev]
+    - !Install [ poppler-data]
+
+    # file compressors
+    - !Install [ liblzma-dev]
+    - !Install [ libbz2-dev]
+
+    # ???
+    - !Install [ libxmu-dev]
+    - !Install [ libappstream-glib-dev]
+    - !Install [ librsvg2-dev]
+
+    # mypaint
+    - !Install [ mypaint-brushes]
+    - !Install [ libmypaint-dev]
+
+    # accessibility toolkit
+    - !Install [ libatk1.0-dev]
+
+    #image metadata
+    - !Install [ libgexiv2-dev]
+
+    # graphics toolkit: GTK and GDK
+    - !Install [ libgtk-3-dev]
+
+    # gtk-encode-symbolic-svg
+    # To search installed packages: dpkg -S gtk-encode-symbolic-svg
+    # To search Ubuntu in browser "Ubuntu Packages Search"
+    # Prior to Ubuntu 20.04:  - !Install [ gtk-3-examples]
+    - !Install [libgtk-3-bin]
+
+    # ?
+    - !Install [ libgdk-pixbuf2.0-dev]
+
+    # renderers
+    - !Install [ libpango1.0-dev]
+    - !Install [ libcairo2-dev]
+
+    # optional but suppress warnings
+    - !Install [ libcanberra-gtk3-module ]
+
+    # optional for browsing API docs
+    - !Install [ yelp ]
+
+    # Ubuntu requires this else Gimp..Gtk crashes with:  Icon 'image-missing' not present in theme Symbolic
+    - !Install [ gnome-icon-theme ]
+
+    # Since 2.99.2, Gimp requires vala compiler
+    - !Install [ valac ]
+
+    # avoid dbus error messages from gimp
+    - !Install [ dbus-x11 ]
+
+    # Needed for meson, clang build
+    - !Install [ libomp-dev ]
+
+    # gimp tests want x11 virtual frame buffer
+    - !Install [xvfb]
+    
+
+    # remove DNS file that vagga will recreate after build
+    # !!! You must do this last, and not at the beginning of a container build
+    - !Sh "rm /etc/resolv.conf"
+
+    # Larger /tmp for testing
+    # 100Mi is default, not enough to create many image files
+    volumes:
+      /tmp: !Tmpfs { size: 500Mi, mode: 0o1777 }
+
+    environ:
+      HOME: /work/.home
+
+
+
+  # with babl, gegl source
+  # gimp requires latest babl, gegl, so we build instead of install
+  # These are relatively stable compared to gimp source
+  gimpDepsSource:
+    setup:
+    - !Container gimpDeps
+
+    # use git to clone the repository
+    - !Sh |
+       git clone https://gitlab.gnome.org/GNOME/babl.git /home/babl
+
+    - !Sh |
+       git clone https://gitlab.gnome.org/GNOME/gegl.git /home/gegl
+
+    # starting about Dec. 2021, require gexiv2 > 12.2 which is not present in Ubuntu
+
+    - !Sh |
+       git clone https://gitlab.gnome.org/GNOME/gexiv2.git /home/gexiv2
+
+
+  # With built babl, gegl, gexiv2
+  bablGeglDev:
+    setup:
+    - !Container gimpDepsSource
+
+    # Build (from source) certain prereqs of gimp: babl, gegl
+
+    # We don't set GIMP_PREFIX.  Instead we install to default place.
+
+    # If Debian, need the architecture label
+    # TODO not working, see below, hardcoded
+    - !Sh echo "Determine architecture"
+    - !Sh dpkg-architecture -qDEB_HOST_MULTIARCH 2> /dev/null
+    - !Env
+      MY_ARCH: dpkg-architecture -qDEB_HOST_MULTIARCH 2> /dev/null
+    - !Sh echo $MY_ARCH
+
+    # Used by GIMP build to detect the build dependencies
+    # E.G. gegl depends on babl installed and uses pkgconfig to find it
+    # This has Debian path prepended
+    # TODO "${GIMP_PREFIX}/lib/${MY_ARCH}/pkgconfig:${GIMP_PREFIX}/lib/pkgconfig:${GIMP_PREFIX}/share/pkgconfig"
+    #- !Env
+    #  PKG_CONFIG_PATH: "/home/lib/x86_64-linux-gnu/pkgconfig:/home/lib/pkgconfig:/home/share/pkgconfig"
+    - !Sh echo $PKG_CONFIG_PATH
+
+
+    # Note babl and gegl build the same
+
+    - !Sh |
+        cd /home/babl
+        meson _build \
+         --buildtype=debug \
+          -Dwith-docs=false
+        cd _build
+        ninja
+        ninja install
+
+    # Used to find the glib-introspection dependencies.
+    # gegl builds its introspection data.
+    # To do so, it must find Babl-0.1.gir
+
+    - !Env
+      XDG_DATA_DIRS: "/usr/local/share:/usr/share"
+
+    - !Sh echo ">>>>>>  XDG_DATA_DIRS" $XDG_DATA_DIRS
+
+    - !Sh |
+        cd /home/gegl
+        meson _build \
+         --buildtype=debug \
+         -Ddocs=false \
+         -Dgtk-doc=false
+        cd _build
+        ninja
+        ninja install
+
+
+    #
+    - !Sh |
+        cd /home/gexiv2
+        meson _build \
+         --buildtype=debug
+        cd _build
+        ninja
+        ninja install
+
+    # remove DNS file that vagga will recreate after build
+    - !Sh "rm /etc/resolv.conf"
+
+
+
+
+  # Container ready to build GIMP using automake AM
+  # Build directory is not in the container.
+  # GIMP is not built or installed in the container
+  # Local custom Gimp plugins not in the container.
+
+  gimpAMDev:
+    setup:
+    - !Container bablGeglDev
+
+    # resolve FAILED: cursors/gimp-tool-cursors.c   Related to vector icons?
+    - !Env  XDG_DATA_DIRS: "/usr/local/share:/usr/share"
+
+    # resolve ../plug-ins/common/file-pdf-load.c:32:10: fatal error: poppler.h: No such file or directory
+    - !Env LD_LIBRARY_PATH: "/usr/local/lib/x86_64-linux-gnu:/usr/lib"
+
+    - !Env PKG_CONFIG_PATH: "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig"
+    
+
+    - !EnsureDir /work/gimpBuild
+
+    # configure out of tree build dir
+    - !Sh |
+        cd /work/gimpBuild
+        ../gimp/autogen.sh --disable-docs --enable-debug --disable-gi-docgen --without-vala
+
+    # not make here, instead make in command
+
+
+
+commands:
+
+  run: !Command
+    description: Build, install, run gimp GUI in gimpAMDev container
+    container:  gimpAMDev
+    write-mode: transient-hard-link-copy
+    run: |
+      # Setup env, the container does not do this
+      export LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu:/usr/local/lib
+      export HOME=/work/.home
+      export GIMP_PREFIX=/usr/local
+      export XDG_DATA_DIRS=/usr/local/share:/usr/share
+      export GI_TYPELIB_PATH=/usr/local/lib/x86_64-linux-gnu/girepository-1.0:/usr/local/lib/girepository-1.0
+      export NO_AT_BRIDGE=1
+
+      echo "lkk cd to build dir"
+      cd /work/gimpBuild
+
+      echo "lkk AM gcc compile GIMP"
+      make all-am -j8
+
+      echo "lkk install GIMP"
+      make install
+
+      echo "lkk running gimp"
+      # valgrind /usr/local/bin/gimp-2.99 --verbose --stack-trace-mode query
+      #/usr/local/bin/gimp-2.99 --verbose --stack-trace-mode query
+
+
+
+
+
+

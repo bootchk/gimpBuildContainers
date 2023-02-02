@@ -1,0 +1,11 @@
+--- a/gegl/gegl-op.h   2022-11-27 08:45:10.182950592 +0100
++++ b/gegl/gegl-op.h   2022-11-27 08:45:19.266951069 +0100
+@@ -716,7 +716,7 @@
+                          const gchar *value)
+ {
+   const char *set_value = gegl_param_spec_get_property_key (pspec, key);
+-  if (set_value && g_str_equal (value, set_value))
++  if (set_value && (strcmp (value, set_value) == 0))
+     return TRUE;
+   return FALSE;
+ } 
