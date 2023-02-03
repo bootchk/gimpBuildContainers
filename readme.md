@@ -11,7 +11,7 @@ i.e. with varied Linux distributions, compilers, and libraries.
 
 Everything is scripted and so repeatable.
 Only the scripts are in this repo.
-All dependencies are installed into a container.
+All tools and dependencies are installed into a container.
 You use a command line, but commands are from the scripts,
 and execute in the container.
 
@@ -25,7 +25,7 @@ not shell or Python scripts.
 Unfortunately, you may need to learn vagga.
 
 Alternatively, you can use other container scripts, such as Docker scripts, or NixOS?
-The advantage of vagga is that you you never (hardly ever) need root privilege.
+The advantage of vagga is that you never (hardly ever) need root privilege.
 
 # Status
 
@@ -38,21 +38,22 @@ It can just document something that worked once.
 ```
 install vagga
 clone this repo
-cd alpineMesonGcc  (that is the "work" directory)
+cd mesonClang  (that is the "work" directory)
 git clone https://gitlab.gnome.org/GNOME/gimp.git (get the source into the work directory)
 vagga --use-env DISPLAY run
 ```
 
-That should build Gimp and run it, in a container.
+That should build Gimp and run it, in a container, using the display of the host.
 Note you haven't installed anything but vagga on your machine.
 
-To delete the container:
+Touch something in the gimp repo, and repeat the last command.
+It should rebuild (compile and link) just what needs to be rebuilt, and reinstall Gimp in the container.
+
+To delete the container, which is all in one directory:
 
 ```
 rm -rf .vagga
 ```
-
-The container is all in .vagga.
 
 ## Vagga userspace containers
 
@@ -63,7 +64,7 @@ Your base system is untouched.
 
 A container is just a rooted file system, related to the chroot command.
 
-## About our use of vagga
+## About the use of vagga
 
 Vagga seems to be commonly used to build containers for working programs.
 That is, a tool for building system images, usually installed.
@@ -79,22 +80,54 @@ You must first install vagga.
 That is the only thing you need to install in your system.
 Everything else is installed in a container and is easily deleted.
 
-TODO
+Follow the instructions here, for Ubuntu: https://vagga.readthedocs.io/en/latest/installation.html
+
+vagga has one dependency, it requires newuidmap from package uidmap
+
+```
+>sudo apt install uidmap
+```
+
+You also need to install git.
+Otherwise, your system doesn't need to have any developer tools,
+since they will be installed in a container.
 
 ## Configuring vagga
 
-You will want to configure the vagga cache.
+For performance, you will want to configure the vagga cache.
+This makes vagga cache the downloaded packages that a vagga script installs.
+Since you probably will rebuild the containers sometime,
+and since you probably will have many project (that is, containers)
+you want a global cache for vagga.
 
-TODO
+See https://vagga.readthedocs.io/en/latest/tips.html which says:
+
+Edit the settings file:
+
+```
+vi ~/.config/vagga/settings.yaml
+```
+
+and add this line:
+
+```
+cache-dir: ~/.cache/vagga/cache
+```
+
+Also, make the cache dir:
+
+```
+mkdir ~/.cache/vagga/cache
+```
 
 ## About the container structure
 
-The containers are stacked (inherited) one on top of the other
+The scripts create stacked containers (inherited) one on top of the other
 (done using vagga capabilities which uses links.)
 This is done simply as a matter of documentation,
 but also so that changing one container need not rebuild one huge container.
 
-For example, starting with the base container, the stacked containers hold:
+For example, starting with the base container, the stacked containers typically hold:
 
     - the OS with some tools.
     - more tools specific to a Gimp build.
@@ -104,9 +137,10 @@ For example, starting with the base container, the stacked containers hold:
 ## Build configurations
 
 Each subdirectory builds and runs the Gimp app using different tools.
-The name of a subdirectory denotes the build system and compiler.  Unless otherwise stated the OS is the latest Ubuntu.
+The name of a subdirectory may denote the OS, build system, and compiler.  
+Unless otherwise stated the OS is the latest Ubuntu.
 
-The choices are:
+Example choices are:
 
     - alpineMesonGcc : build under the alpine distribution using the meson build system and the gcc compiler
 
@@ -156,17 +190,26 @@ The usual clone will get the "master" i.e. under development, version.
 git clone https://gitlab.gnome.org/GNOME/gimp.git
 ```
 
+You may already have your personal clone of Gimp at Gitlab.
+Then you clone it, develop a branch, push to the origin, and create MR's to the main Gimp project.
+Then your upstream is the main Gimp repo, your origin is your personal clone at Gitlab,
+and you have a local clone in your work directories.
+
+```
+git clone https://gitlab.gnome.org/GNOME/<yourname>/gimp.git
+```
+
 (Repos are cheap.  
 The scripts expect a separate gimp repo in each work directory.
-That doesn't make it easy to build the same repo in different ways.
-FIXME: share the gimp repo among many vagga scripts.
+That doesn't make it easy to build the same repo in different containers.
+FIXME: share the gimp repo among many vagga scripts/containers.
 )
 
 ## Basic usage
 
 vagga --use-env DISPLAY run
 
-That builds and runs the GIMP app, using the display (windows) of your system.
+That builds and runs the GIMP app, using the display (windows) of your host system.
 
 "run" is a command, named by vagga conventions.
 Here it always means: build, install, and run Gimp.
@@ -176,13 +219,14 @@ Here it always means: build, install, and run Gimp.
 Not in the container, but in the work directory:
 
     - the gimp repo (the source code you can edit)
-    - the build directory 
+    - the build directory (e.g. gimpMesonClangBuild, an out-of-tree build)
     - .home, your HOME directory while in the container
 
 In the container (somewhere inside the .vagga directory)
 
     - installed gimp
     - built and installed babl and gegl libraries
+    - the installed dependencies (libraries) of gimp
 
 the container is writeable just so that a build can install into the container
 (see "write-transient" in the vagga script.)
@@ -205,10 +249,36 @@ A build is in the container, but the artifacts are in the work directory e.g. in
 Gimp is installed into the container.
 See vagga docs about transient.
 
-## Debugging
+## Debugging Gimp in a container
 
 You can edit the command portion of the vagga.yaml script
 to run the debugger (dbg) or valgrind, ahead of Gimp.
+
+You can also edit the command portion of the vagga.yaml script
+to set environment variables which make Gimp verbose with debug messages.
+
+See examples in the scripts.
+
+## Fresh install of Gimp
+
+When a script installs Gimp into a container,
+it uses the .home directory in the work directory,
+as the home directory for the user.
+This is outside the container.
+
+Gimp stores its setting there.
+A subsequent install of Gimp (running vagga again)
+does not overwrite the config.
+
+To get a fresh install, simply delete .home/.config/GIMP directory.
+
+## Installing Gimp plugins
+
+The plugins distributed with Gimp are installed into the container.
+
+You can install your own plugins into the .home/.config/GIMP/... directories,
+outside the container.
+Some of the vagga scripts have example commands that do that.
 
 ## Advanced development
 
@@ -218,9 +288,7 @@ You can also edit the script to build the very latest libraries that Gimp depend
 
 ## Finally, cleaning up
 
-Don't forget to commit and push any changes to the gimp repo in the work directory!!!
-My origin is a personal gimp clone on gitlab.gnome.org.
-I push to that origin, and submit MR's from there.
+Don't forget to commit and push any changes you made in the gimp repo in the work directory!!!
 
 When you are done, you can simply delete the containers (in a hidden file):
 
@@ -228,10 +296,14 @@ When you are done, you can simply delete the containers (in a hidden file):
 >rm -rf .vagga  
 ```
 
-Sometimes you can also free up old containers by:
+When you are running low on file space, 
+you can also free up old containers by:
 
 ```
 vagga _clean --unused
 ```
 
-You can also delete the build directory.
+You can also delete the build directory and the .home directory.
+So the work directory is back to just the vagga.yaml script.
+Read the .gitignore file to see that it ignores
+the same files, that you can delete.
