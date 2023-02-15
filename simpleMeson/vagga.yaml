@@ -1,0 +1,290 @@
+# Vagga script to build Gimp using meson
+
+# Attempts to be the simplest possible build
+#    No extra tools
+#    No extra env variables
+#    As few possible dependencies as Gimp will build
+#
+# We don't set GIMP_PREFIX or PKG_CONFIG_PATH
+
+containers:
+
+  # basic OS with dev (compiling)
+  baseOS:
+    setup:
+    - !Ubuntu jammy
+    
+    # tools for dev (C compiler)
+    - !Install [build-essential]
+
+
+
+
+  # with required build tools
+  baseWithTools:
+    setup:
+    - !Container baseOS
+    
+    # Enable universe repo, where many packages live
+    - !UbuntuUniverse
+
+    # GIMP build needs setuptools
+    - !Install [python3-setuptools]
+
+    # meson is a python3 app
+    # Install packaged version, which might be too old.
+    - !Install [meson]
+
+    # meson and autotools use pkg-config
+    - !Install [pkg-config]
+
+    # meson.build calls git
+    - !Install [git]
+
+    # meson will use cmake if available?
+    - !Install [cmake]
+
+    # build uses gobject introspection tools
+    - !Install [gobject-introspection]
+
+    # more tools
+    - !Install [ xsltproc]
+
+    # tool to build API docs
+    - !Install [gtk-doc-tools]
+
+    # specific to autotools build
+    # - !Install [libtool]
+
+    # in8n internationalization
+    - !Install [intltool]
+
+    # New required tool for Gimp gettext stuff, June 2022
+    - !Install [ autopoint ]
+
+
+
+  # with libraries required by gegl, babl, gimp (and other things we build)
+
+  # these are package names, might depend on distribution
+  # e.g. package names are different in alpine
+
+  gimpDeps:
+    setup:
+    - !Container baseWithTools
+
+    # babl, gegl, GIMP uses glib group of libraries
+    # package comprises glib, gobject, and gio
+    - !Install [glib2.0-dev]
+
+    # the builds deposit introspection data
+    # If omit, get can't find ...gir... when building gegl
+    - !Install [libgirepository1.0-dev]
+
+    # babl specific
+
+    # links against lcms2 (lite color mgt system) library, need the dev flavor
+    - !Install [liblcms2-dev]
+
+    # gegl specific
+
+    # depends on babl (which we build), and these libraries from packages
+    - !Install [libjson-glib-dev]
+
+    # gimp specific
+    # Somewhat in reverse order of complain by build
+
+    # interpreters
+    # Python3 PyGObject.  See earlier, installed Python3
+    - !Install [ python3-gi]
+    # lua
+    - !Install [ luajit]
+    - !Install [ lua-lgi ]
+    # javascript
+    - !Install [ gjs]
+
+    # plugins, mainly file format plugins?
+    # JPEG format
+    - !Install [ libjpeg-dev]
+    # TIFF format
+    - !Install [ libtiff-dev]
+    # PDF format
+    - !Install [ libpoppler-glib-dev]
+    - !Install [ poppler-data]
+
+    # file compressors
+    - !Install [ liblzma-dev]
+    - !Install [ libbz2-dev]
+
+    # ???
+    - !Install [ libxmu-dev]
+    - !Install [ libappstream-glib-dev]
+    - !Install [ librsvg2-dev]
+
+    # mypaint
+    - !Install [ mypaint-brushes]
+    - !Install [ libmypaint-dev]
+
+    # accessibility toolkit
+    - !Install [ libatk1.0-dev]
+
+    #image metadata
+    - !Install [ libgexiv2-dev]
+
+    # graphics toolkit: GTK and GDK
+    - !Install [ libgtk-3-dev]
+
+    # gtk-encode-symbolic-svg
+    # Prior to Ubuntu 20.04:  - !Install [ gtk-3-examples]
+    - !Install [libgtk-3-bin]
+
+    # ?
+    - !Install [ libgdk-pixbuf2.0-dev]
+
+    # renderers
+    - !Install [ libpango1.0-dev]
+    - !Install [ libcairo2-dev]
+
+    # optional but suppress warnings
+    - !Install [ libcanberra-gtk3-module ]
+
+    # optional for browsing API docs
+    - !Install [ yelp ]
+
+    # Ubuntu requires this else Gimp..Gtk crashes with:  Icon 'image-missing' not present in theme Symbolic
+    - !Install [ gnome-icon-theme ]
+
+    # Since 2.99.2, Gimp requires vala compiler
+    - !Install [ valac ]
+
+    # avoid dbus error messages from gimp
+    - !Install [ dbus-x11 ]
+
+    # Needed for meson, clang build
+    - !Install [ libomp-dev ]
+
+    # gimp tests want x11 virtual frame buffer
+    - !Install [xvfb]
+    
+
+    # remove DNS file that vagga will recreate
+    # !!! You must do this last, and not at the beginning of a container build
+    - !Sh "rm /etc/resolv.conf"
+
+    # Larger /tmp for testing
+    # 100Mi is default, not enough to create many image files
+    volumes:
+      /tmp: !Tmpfs { size: 500Mi, mode: 0o1777 }
+
+    environ:
+      HOME: /work/.home
+
+
+  # with babl, gegl, gexiv2 source
+  # gimp requires latest, so we build instead of install
+  # These are relatively stable compared to gimp source
+  gimpDepsSource:
+    setup:
+    - !Container gimpDeps
+
+    # use git to clone the repository
+    - !Sh |
+       git clone https://gitlab.gnome.org/GNOME/babl.git /home/babl
+
+    - !Sh |
+       git clone https://gitlab.gnome.org/GNOME/gegl.git /home/gegl
+
+    # starting about Dec. 2021, require gexiv2 > 12.2 which is not present in Ubuntu
+    - !Sh |
+       git clone https://gitlab.gnome.org/GNOME/gexiv2.git /home/gexiv2
+
+
+
+  # With built babl, gegl, gexiv2
+  bablGeglDev:
+    setup:
+    - !Container gimpDepsSource
+
+    # Note "ninja -C _build" means cd to that directory first
+    - !Sh |
+        cd /home/babl
+        meson _build
+        cd _build
+        ninja
+        ninja install
+
+    - !Sh |
+        cd /home/gegl
+        meson _build
+        cd _build
+        ninja
+        ninja install
+
+    - !Sh |
+        cd /home/gexiv2
+        meson _build 
+        cd _build
+        ninja
+        ninja install
+
+    # remove DNS file that vagga will recreate
+    - !Sh "rm /etc/resolv.conf"
+
+
+
+  # Container ready to build GIMP
+  # Build directory is not in the container.
+  # GIMP is not built or installed in the container
+  # Local custom Gimp plugins not in the container.
+
+  # The container should NOT automatically rebuild if /work/gimp source changes
+  # But if you change a meson.build file, you need to rebuild this container??
+
+  gimpMesonDev:
+    setup:
+    - !Container bablGeglDev
+
+    # This container NOT depend on changed gimp source
+    # Note that meson builds out of tree, i.e. does not touch gimp directory
+    # Except that it does, it puts pdbgen files back in the source tree
+
+    - !Sh |
+        cd /work/gimp
+        meson setup /work/gimpMesonBuild
+
+
+
+
+
+commands:
+
+
+  run: !Command
+    description: Build, install, run gimp GUI in gimpMesonDev container
+    container:  gimpMesonDev
+    write-mode: transient-hard-link-copy
+    run: |
+
+      # Peculiar to using a container, not to gimp
+      export HOME=/work/.home
+
+      cd /work/gimpMesonBuild
+      
+      echo "meson compile and install GIMP"
+      meson compile -j 8
+      meson install
+
+      # cd out of the build environment
+      cd /work
+
+      echo "The environment in which gimp is run:"
+      env
+
+      echo "running gimp"
+      #/usr/local/bin/
+      gimp-2.99 --verbose --stack-trace-mode query
+
+
+
+
+
