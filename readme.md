@@ -139,16 +139,23 @@ For example, starting with the base container, the stacked containers typically 
 Each subdirectory builds and runs the Gimp app using different tools.
 The name of a subdirectory may denote the OS, build system, and compiler.  
 Unless otherwise stated the OS is the latest Ubuntu.
+Unless otherwise stated building 2.99 latest GIMP.
 
-Example choices are:
+Example choices that work are:
+
+    - mesonClang : build using meson and clang 
+
+    - automakeGcc : build using automake and gcc
+    
+    - simpleMeson : build using meson and Gcc, without ANY env variables set
+
+    - 2.10automakeGcc: build latest 2.10 using automake and Gcc (but doesn't build Python2 for GIMP)
+
+Example choices that don't work (in progress) are:
 
     - alpineMesonGcc : build under the alpine distribution using the meson build system and the gcc compiler
 
-    - mesonClang : build under Ubuntu distribution using meson and clang
-
-    - automakeGcc : build under Ubuntu distribution using automake and gcc
-
-    - valgrindPlugin: sets up the environment for Gimp to valgrind a plugin
+    - valgrindPlugin: sets up the environment to valgrind a GIMP plugin
 
     - crossroadWindows: cross compiles on Linux for Windows (you can't run in it, it doesn't put Wine in the container.)
 
@@ -172,7 +179,7 @@ Clone a gimp repo into it.
 
 Edit the gimp source.
 
-Run the "run" command as above.
+Run the "vagga --use-env DISPLAY run" command.
 (The first time, this takes a long time, building the containers.)
 
 Exercise the Gimp app.
@@ -256,6 +263,11 @@ to run the debugger (dbg) or valgrind, ahead of Gimp.
 
 You can also edit the command portion of the vagga.yaml script
 to set environment variables which make Gimp verbose with debug messages.
+
+G_DEBUG
+GTK_DEBUG
+GIMP_DEBUG
+GIMP_PLUGIN_DEBUG
 
 See examples in the scripts.
 

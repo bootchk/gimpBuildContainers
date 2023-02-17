@@ -1,38 +1,37 @@
-# Vagga script to build Gimp using meson
+# Vagga script to build Gimp using automake and gcc
 
-# Attempts to be the simplest possible build
-#    No extra tools
-#    No extra env variables
-#    As few possible dependencies as Gimp will build
-#
-# We don't set GIMP_PREFIX or PKG_CONFIG_PATH
+# !!! Builds 2.10.  Differences from 2.99 are marked by # <<<2.10
 
 containers:
 
   # basic OS with dev (compiling)
   baseOS:
     setup:
-    - !Ubuntu jammy
+    - !Ubuntu kinetic
     
     # tools for dev (C compiler)
     - !Install [build-essential]
+    - !Install [gdb]
 
 
 
 
   # with required build tools
+  # Some tools are for optional build: meson, clang
   baseWithTools:
     setup:
     - !Container baseOS
     
     # Enable universe repo, where many packages live
     - !UbuntuUniverse
-
+    
     # GIMP build needs setuptools
     - !Install [python3-setuptools]
 
     # meson is a python3 app
     # Install packaged version, which might be too old.
+    # Alternatively, get latest using pip
+    # build gegl requires meson
     - !Install [meson]
 
     # meson and autotools use pkg-config
@@ -54,13 +53,19 @@ containers:
     - !Install [gtk-doc-tools]
 
     # specific to autotools build
-    # - !Install [libtool]
+    - !Install [libtool]
 
     # in8n internationalization
     - !Install [intltool]
 
     # New required tool for Gimp gettext stuff, June 2022
     - !Install [ autopoint ]
+
+    # Packaged valgrind is 3.18, need later for clang14
+    - !Install [ valgrind ]
+
+    # Install libc w debug for valgrind
+    # - !Install [libc6-dbg]
 
 
 
@@ -95,13 +100,15 @@ containers:
     # Somewhat in reverse order of complain by build
 
     # interpreters
+
+    # <<<2.10 doesn't use GI
     # Python3 PyGObject.  See earlier, installed Python3
-    - !Install [ python3-gi]
+    #- !Install [ python3-gi]
     # lua
-    - !Install [ luajit]
-    - !Install [ lua-lgi ]
+    #- !Install [ luajit]
+    #- !Install [ lua-lgi ]
     # javascript
-    - !Install [ gjs]
+    #- !Install [ gjs]
 
     # plugins, mainly file format plugins?
     # JPEG format
@@ -132,11 +139,19 @@ containers:
     - !Install [ libgexiv2-dev]
 
     # graphics toolkit: GTK and GDK
-    - !Install [ libgtk-3-dev]
+    # <<<2.10 uses gtk2
+    - !Install [ libgtk2.0-dev]
 
     # gtk-encode-symbolic-svg
+    # To search installed packages: dpkg -S gtk-encode-symbolic-svg
+    # To search Ubuntu in browser "Ubuntu Packages Search"
     # Prior to Ubuntu 20.04:  - !Install [ gtk-3-examples]
-    - !Install [libgtk-3-bin]
+    # <<<2.10 uses gtk2
+    - !Install [libgtk2.0-bin]
+
+    # optional but suppress warnings
+    # <<<2.10 uses gtk2
+    - !Install [ libcanberra-gtk-module ]
 
     # ?
     - !Install [ libgdk-pixbuf2.0-dev]
@@ -145,43 +160,34 @@ containers:
     - !Install [ libpango1.0-dev]
     - !Install [ libcairo2-dev]
 
-    # optional but suppress warnings
-    - !Install [ libcanberra-gtk3-module ]
-
-    # optional for browsing API docs
-    - !Install [ yelp ]
-
     # Ubuntu requires this else Gimp..Gtk crashes with:  Icon 'image-missing' not present in theme Symbolic
     - !Install [ gnome-icon-theme ]
-
-    # Since 2.99.2, Gimp requires vala compiler
-    - !Install [ valac ]
 
     # avoid dbus error messages from gimp
     - !Install [ dbus-x11 ]
 
+    # Since 2.99.2, Gimp requires vala compiler
+    # gexiv2 requires 
+    - !Install [ valac ]
+
     # Needed for meson, clang build
-    - !Install [ libomp-dev ]
+    #- !Install [ libomp-dev ]
 
     # gimp tests want x11 virtual frame buffer
     - !Install [xvfb]
     
 
-    # remove DNS file that vagga will recreate
+    # remove DNS file that vagga will recreate after build
     # !!! You must do this last, and not at the beginning of a container build
     - !Sh "rm /etc/resolv.conf"
-
-    # Larger /tmp for testing
-    # 100Mi is default, not enough to create many image files
-    volumes:
-      /tmp: !Tmpfs { size: 500Mi, mode: 0o1777 }
 
     environ:
       HOME: /work/.home
 
 
-  # with babl, gegl, gexiv2 source
-  # gimp requires latest, so we build instead of install
+
+  # with babl, gegl source
+  # gimp requires latest babl, gegl, so we build instead of install
   # These are relatively stable compared to gimp source
   gimpDepsSource:
     setup:
@@ -194,10 +200,9 @@ containers:
     - !Sh |
        git clone https://gitlab.gnome.org/GNOME/gegl.git /home/gegl
 
-    # starting about Dec. 2021, require gexiv2 > 12.2 which is not present in Ubuntu
-    - !Sh |
-       git clone https://gitlab.gnome.org/GNOME/gexiv2.git /home/gexiv2
-
+    # starting about Dec. 2021, require gexiv2 > 12.2 
+    # which might not be packages, but must be built
+    # <<<2.10 does not require building gexiv2
 
 
   # With built babl, gegl, gexiv2
@@ -205,7 +210,12 @@ containers:
     setup:
     - !Container gimpDepsSource
 
-    # Note "ninja -C _build" means cd to that directory first
+    # Build (from source) certain prereqs of gimp: babl, gegl
+
+    # We don't set GIMP_PREFIX.  Instead we install to default place.
+
+    # Note babl and gegl build the same
+
     - !Sh |
         cd /home/babl
         meson _build
@@ -220,69 +230,75 @@ containers:
         ninja
         ninja install
 
-    - !Sh |
-        cd /home/gexiv2
-        meson _build 
-        cd _build
-        ninja
-        ninja install
-
-    # remove DNS file that vagga will recreate
+    # remove DNS file that vagga will recreate after build
     - !Sh "rm /etc/resolv.conf"
 
 
 
-  # Container ready to build GIMP
+
+  # Container ready to build GIMP using automake AM
   # Build directory is not in the container.
   # GIMP is not built or installed in the container
   # Local custom Gimp plugins not in the container.
 
-  # The container should NOT automatically rebuild if /work/gimp source changes
-  # But if you change a meson.build file, you need to rebuild this container??
-
-  gimpMesonDev:
+  gimpAMDev:
     setup:
     - !Container bablGeglDev
 
-    # This container NOT depend on changed gimp source
-    # Note that meson builds out of tree, i.e. does not touch gimp directory
-    # Except that it does, it puts pdbgen files back in the source tree
+    # resolve FAILED: cursors/gimp-tool-cursors.c   Related to vector icons?
+    #- !Env  XDG_DATA_DIRS: "/usr/local/share:/usr/share"
 
+    # resolve ../plug-ins/common/file-pdf-load.c:32:10: fatal error: poppler.h: No such file or directory
+    #- !Env LD_LIBRARY_PATH: "/usr/local/lib/x86_64-linux-gnu:/usr/lib"
+
+    #- !Env PKG_CONFIG_PATH: "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig"
+    
+
+    - !EnsureDir /work/gimpBuild
+
+    # !!! Not fighting with Python2: --disable-python
+
+    # configure out of tree build dir
     - !Sh |
-        cd /work/gimp
-        meson setup  /work/gimpMesonBuild
+        cd /work/gimpBuild
+        ../gimp/autogen.sh --disable-docs --enable-debug --disable-gi-docgen --without-vala --disable-python
 
-
+    # not make here, instead make in command
 
 
 
 commands:
 
-
   run: !Command
-    description: Build, install, run gimp GUI in gimpMesonDev container
-    container:  gimpMesonDev
+    description: Build, install, run gimp GUI in gimpAMDev container
+    container:  gimpAMDev
     write-mode: transient-hard-link-copy
     run: |
-
-      # Peculiar to using a container, not to gimp
+      # Setup env, the container does not do this
+      export LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu:/usr/local/lib
       export HOME=/work/.home
+      export GIMP_PREFIX=/usr/local
+      export XDG_DATA_DIRS=/usr/local/share:/usr/share
+      export GI_TYPELIB_PATH=/usr/local/lib/x86_64-linux-gnu/girepository-1.0:/usr/local/lib/girepository-1.0
+      export NO_AT_BRIDGE=1
 
-      cd /work/gimpMesonBuild
-      
-      echo "meson compile and install GIMP"
-      meson compile -j 8
-      meson install
+      echo "lkk cd to build dir"
+      cd /work/gimpBuild
 
-      # cd out of the build environment
-      cd /work
+      echo "lkk AM gcc compile GIMP"
+      make all-am -j8
 
-      echo "The environment in which gimp is run:"
-      env
+      echo "lkk install GIMP"
+      make install
 
-      echo "running gimp"
-      #/usr/local/bin/
-      gimp-2.99 --verbose --stack-trace-mode query
+      echo "lkk running gimp"
+      which gimp
+      # <<<2.10 has a different name
+      gimp --verbose --stack-trace-mode query
+      #valgrind gimp --verbose --stack-trace-mode query
+
+      # !!! At one time this worked, but recently has been crashing with an X Window error
+
 
 
 
