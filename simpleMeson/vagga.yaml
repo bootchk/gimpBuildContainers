@@ -12,8 +12,8 @@ containers:
   # basic OS with dev (compiling)
   baseOS:
     setup:
-    - !Ubuntu jammy
-    
+    - !Ubuntu mantic
+
     # tools for dev (C compiler)
     - !Install [build-essential]
 
@@ -24,7 +24,7 @@ containers:
   baseWithTools:
     setup:
     - !Container baseOS
-    
+
     # Enable universe repo, where many packages live
     - !UbuntuUniverse
 
@@ -61,6 +61,8 @@ containers:
 
     # New required tool for Gimp gettext stuff, June 2022
     - !Install [ autopoint ]
+
+    - !Install [valgrind]
 
 
 
@@ -165,7 +167,7 @@ containers:
 
     # gimp tests want x11 virtual frame buffer
     - !Install [xvfb]
-    
+
 
     # remove DNS file that vagga will recreate
     # !!! You must do this last, and not at the beginning of a container build
@@ -222,7 +224,7 @@ containers:
 
     - !Sh |
         cd /home/gexiv2
-        meson _build 
+        meson _build
         cd _build
         ninja
         ninja install
@@ -244,13 +246,26 @@ containers:
     setup:
     - !Container bablGeglDev
 
+    - !Env LD_LIBRARY_PATH: "/usr/local/lib/x86_64-linux-gnu:/usr/lib"
+
+    # perf
+    #- !Install [ linux-tools-common ]
+    #- !Install [ linux-tools-5.19.0-35-generic ]
+    #- !Install [ sudo ]
+
     # This container NOT depend on changed gimp source
     # Note that meson builds out of tree, i.e. does not touch gimp directory
     # Except that it does, it puts pdbgen files back in the source tree
 
+    # must build without asan to get gir, then build w asan
+    # -Db_sanitize=address  <- this works, for default compiler gcc
+    # -Dg-ir-doc=true requires yelp-build ?
+
     - !Sh |
         cd /work/gimp
-        meson setup  /work/gimpMesonBuild
+        meson setup  /work/gimpMesonBuild --buildtype debugoptimized
+        #meson configure /work/gimpMesonBuild
+
 
 
 
@@ -268,21 +283,66 @@ commands:
       # Peculiar to using a container, not to gimp
       export HOME=/work/.home
 
+      # Peculiar to GIMP use of GIR
+      export GI_TYPELIB_PATH=/usr/local/lib/x86_64-linux-gnu/girepository-1.0:/usr/local/lib/girepository-1.0
+
+      export LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu:/usr/local/lib
+      # suppress dbind errors for accessability
+      export NO_AT_BRIDGE=1
+
       cd /work/gimpMesonBuild
-      
+
       echo "meson compile and install GIMP"
-      meson compile -j 8
+      meson compile -j 12
       meson install
+
+      #echo "configure build for asan"
+      #cd /work
+      #meson configure /work/gimpMesonBuild -Db_sanitize=address
+      #cd /work/gimpMesonBuild
+      #meson compile -j 12
+      #meson install
+
 
       # cd out of the build environment
       cd /work
 
-      echo "The environment in which gimp is run:"
-      env
+      #echo "The environment in which gimp is run:"
+      #env
+
+      export G_MESSAGES_DEBUG=all
+
+      export GIMP_PLUGIN_DEBUG_WRAP=gradient-flare
+      export GIMP_PLUGIN_DEBUG_WRAPPER=valgrind
+
+      which valgrind
 
       echo "running gimp"
-      #/usr/local/bin/
-      gimp-2.99 --verbose --stack-trace-mode query
+      /usr/local/bin/gimp-2.99 --verbose --stack-trace-mode query
+
+      #echo "perfing gimp"
+      # To do this, you must sysctl in the host, not the container
+
+      # enable it
+      #ls -al /proc/sys/kernel
+      #cat /proc/sys/kernel/perf_event_paranoid
+      #sudo sh -c 'echo -1 > /proc/sys/kernel/perf_event_paranoid'
+      # sudo not found, must install package sudo
+      # Permission denied to create ?
+
+      #echo "calling sudo sysctl -w"
+      #sudo sysctl -w kernel.perf_event_paranoid=-1
+      # permission denied
+
+      #echo "calling sudo sysctl i.e. temporary"
+      #sudo sysctl kernel.perf_event_paranoid=-1
+
+
+      #echo "calling perf record gimp"
+      #perf record gimp-2.99 -F 99 -a -g -- sleep 30
+
+      #echo "calling perf report"
+      #perf report -n --stdio
 
 
 

@@ -8,7 +8,7 @@ containers:
   baseOS:
     setup:
     - !Ubuntu kinetic
-    
+
     # tools for dev (C compiler)
     - !Install [build-essential]
     - !Install [gdb]
@@ -21,10 +21,10 @@ containers:
   baseWithTools:
     setup:
     - !Container baseOS
-    
+
     # Enable universe repo, where many packages live
     - !UbuntuUniverse
-    
+
     # GIMP build needs setuptools
     - !Install [python3-setuptools]
 
@@ -167,7 +167,7 @@ containers:
     - !Install [ dbus-x11 ]
 
     # Since 2.99.2, Gimp requires vala compiler
-    # gexiv2 requires 
+    # gexiv2 requires
     - !Install [ valac ]
 
     # Needed for meson, clang build
@@ -175,7 +175,7 @@ containers:
 
     # gimp tests want x11 virtual frame buffer
     - !Install [xvfb]
-    
+
 
     # remove DNS file that vagga will recreate after build
     # !!! You must do this last, and not at the beginning of a container build
@@ -200,7 +200,7 @@ containers:
     - !Sh |
        git clone https://gitlab.gnome.org/GNOME/gegl.git /home/gegl
 
-    # starting about Dec. 2021, require gexiv2 > 12.2 
+    # starting about Dec. 2021, require gexiv2 > 12.2
     # which might not be packages, but must be built
     # <<<2.10 does not require building gexiv2
 
@@ -252,7 +252,7 @@ containers:
     #- !Env LD_LIBRARY_PATH: "/usr/local/lib/x86_64-linux-gnu:/usr/lib"
 
     #- !Env PKG_CONFIG_PATH: "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig"
-    
+
 
     - !EnsureDir /work/gimpBuild
 
@@ -264,6 +264,9 @@ containers:
         ../gimp/autogen.sh --disable-docs --enable-debug --disable-gi-docgen --without-vala --disable-python
 
     # not make here, instead make in command
+
+    - !Install [ language-pack-de-base ]
+
 
 
 
@@ -290,6 +293,10 @@ commands:
 
       echo "lkk install GIMP"
       make install
+
+      locale -a
+
+      export LANG="de_DE.utf8"
 
       echo "lkk running gimp"
       which gimp
