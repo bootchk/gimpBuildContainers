@@ -1,0 +1,185 @@
+# Vagga script to build Gimp using flatpak
+
+containers:
+
+  # basic OS with dev (compiling)
+  baseOS:
+    setup:
+    # 23.10
+    - !Ubuntu mantic
+
+
+
+
+
+  # with required build tools
+  baseWithTools:
+    setup:
+    - !Container baseOS
+
+    # Enable universe repo, where many packages live
+    - !UbuntuUniverse
+
+    # tools for dev (C compiler)
+    - !Install [build-essential]
+
+    # flatpak tools
+    - !Install [flatpak]
+    - !Install [flatpak-builder]
+
+    # Other tools that the scripts call
+    - !Install [elfutils]
+    - !Install [git]
+
+    - !Install [ca-certificates]
+
+    # not essential
+    - !Install [gdb]
+
+    # ???
+    # flatpak-builder uses fuse but severe problems installing in container.
+    # - !Install [fuse]
+
+    # remove DNS file that vagga will recreate after build
+    # !!! You must do this last, and not at the beginning of a container build
+    - !Sh "rm /etc/resolv.conf"
+
+
+  # !!! No gimp dependencies are installed.
+  # Instead, flatpak will build them.
+  # We also do not build babl or gegl
+
+
+  # with flatpak runtimes installed by flatpak
+
+  # Did not seem to persist when --user, because container!  use --system
+  baseWithSDK:
+    setup:
+    - !Container baseWithTools
+
+    - !Sh |
+       flatpak remote-add --if-not-exists --system --from gnome-nightly https://nightly.gnome.org/gnome-nightly.flatpakrepo
+       flatpak install --system gnome-nightly org.gnome.Platform/$(uname -m)/master org.gnome.Sdk/$(uname -m)/master -y
+       flatpak remote-add --if-not-exists --system --from flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+       flatpak install --system flathub org.freedesktop.Sdk.Extension.llvm18 -y
+
+       echo "listing installed flatpaks"
+       flatpak list
+
+
+
+  # Container ready to build GIMP as flatpak
+
+  gimpFlatpakDev:
+    setup:
+    - !Container baseWithSDK
+
+    - !Sh |
+
+       cd /work/gimp
+
+       # GIMP_PREFIX points to the location of the source ???
+       export GIMP_PREFIX=/work/app
+
+       # build Gimp dependencies
+       flatpak-builder --force-clean --ccache --state-dir=../.flatpak-builder --keep-build-dirs --stop-at=gimp \
+                "$GIMP_PREFIX" build/linux/flatpak/org.gimp.GIMP-nightly.json 2>&1 | tee flatpak-builder.log
+
+       # build Gimp
+
+    # create new filesystem name run in the container
+    # put the wayland display socket in it
+    volumes:
+      # bind external volume named runuser pointing to external /run/user/1000 to /run in container
+      /run: !BindRW /volumes/runuser
+      # bind external volume named X11 pointing to external /tmp/.X11-unix to /tmp/.X11-unix in container
+      # See the Firefox example in vagga docs
+      /tmp: !Tmpfs
+        size: 100Mi
+        mode: 0o1777
+        subdirs:
+          .X11-unix:
+      /tmp/.X11-unix: !BindRW /volumes/X11
+
+  gimpFlatpakDev2:
+    setup:
+    - !Container baseWithSDK
+
+    # resolve FAILED: cursors/gimp-tool-cursors.c   Related to vector icons?
+    #- !Env  XDG_DATA_DIRS: "/usr/local/share:/usr/share"
+
+    # resolve ../plug-ins/common/file-pdf-load.c:32:10: fatal error: poppler.h: No such file or directory
+    #- !Env LD_LIBRARY_PATH: "/usr/local/lib/x86_64-linux-gnu:/usr/lib"
+
+    #- !Env PKG_CONFIG_PATH: "/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig"
+
+    - !Sh |
+       cd /work/gimp
+
+       chmod +x build/linux/flatpak/1_build-deps-flatpak.sh
+       build/linux/flatpak/1_build-deps-flatpak.sh
+
+       chmod +x build/linux/flatpak/2_build-gimp-flatpak.sh
+       build/linux/flatpak/2_build-gimp-flatpak.sh
+
+       # Install the flatpak
+       build/linux/flatpak/2_build-gimp-flatpak.sh --ci
+
+       #chmod +x build/linux/flatpak/4_dist-gimp-flatpak.sh
+       #build/linux/flatpak/4_dist-gimp-flatpak.sh
+
+    # create new filesystem name run in the container
+    # put the wayland display socket in it
+    volumes:
+      # bind external volume named runuser pointing to external /run/user/1000 to /run in container
+      /run: !BindRW /volumes/runuser
+
+commands:
+
+  listFlatpaks: !Command
+    description: Test flatpaks installed
+    container:  baseWithSDK
+    run: |
+      flatpak list
+
+  run: !Command
+    description: Build, install, run gimp GUI in gimpMesonDev container
+    container:  gimpFlatpakDev
+    write-mode: transient-hard-link-copy
+    run: |
+      # Setup env, the container does not do this
+
+      #export LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu:/usr/local/lib
+      #export HOME=/work/.home
+      # export GIMP_PREFIX=/usr/local
+      #export XDG_DATA_DIRS=/usr/local/share:/usr/share
+      #export GI_TYPELIB_PATH=/usr/local/lib/x86_64-linux-gnu/girepository-1.0:/usr/local/lib/girepository-1.0
+      #export NO_AT_BRIDGE=1
+
+      #echo "installing the sdk"
+      #flatpak install org.gnome.sdk
+
+      #echo $GIMP_PREFIX
+      #ls $GIMP_PREFIX
+
+      #echo "installing the flatpak"
+      # ? --system
+      # build dir and manifest file
+      # flatpak-builder --install --force-clean /work/_install-x86_64 /work/gimp/build/linux/flatpak/org.gimp.GIMP-nightly.json
+
+      echo "listing flatpaks"
+      flatpak list
+
+      #echo "lkk running gimp"
+      #flatpak run org.gimp.gimp -s
+      #flatpak build-init
+
+      echo "Display is" $DISPLAY
+      echo "ls /tmp is"
+      ls -al /tmp
+      # ? --disable-rofiles-fuse
+
+      echo "run from the build dir"
+      # flatpak-builder --run "$GIMP_PREFIX" /work/gimp/build/linux/flatpak/org.gimp.GIMP-nightly.json gimp-2.99
+      flatpak-builder --run /work/_install-x86_64 /work/gimp/build/linux/flatpak/org.gimp.GIMP-nightly.json gimp-2.99
+

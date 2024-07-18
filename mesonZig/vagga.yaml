@@ -10,15 +10,19 @@ containers:
     # - !Ubuntu lunar
     # 23.10
     - !Ubuntu mantic
+
     # 24.04
     # doesn't work yet
     # - !Ubuntu noble
+    #- !UbuntuRelease { codename: noble, url: http://cloud-images.ubuntu.com/noblel/current/noble-server-cloudimg-amd64-root.tar.gz }
 
     # tools for dev (C compiler)
-    - !Install [build-essential]
-    - !Install [gdb]
+    # - !Install [build-essential]
+    # - !Install [gdb]
 
-
+    # needed to install zig using snap
+    # but doesn't work
+    # - !Install [snapd]
 
 
   # with required build tools
@@ -30,11 +34,6 @@ containers:
     # Enable universe repo, where many packages live
     - !UbuntuUniverse
 
-    # Needed to install meson using pip3
-    #- !Install [ca-certificates]
-    #- !Install [python3-pip]
-    #- !Sh pip3 install meson
-
     # GIMP build needs setuptools
     - !Install [python3-setuptools]
 
@@ -44,14 +43,8 @@ containers:
 
     - !Install [meson]
 
-    # clang versus gcc
-    - !Install [clang]
-
-    # This is not the llvm-runtime needed for asan?
-    # but is a bytecode interpreter
-    # - !Install [llvm-runtime]
-    # ???
-    # - !Install [lib64asan8]
+    # Build zig requires llvm, but the package is too old, need 18
+    # - !Install [llvm]
 
     # gnu ld vs llvm's lld (installs as ld.lld)
     # Don't need this, clang is frontend to linker
@@ -84,28 +77,81 @@ containers:
     # New required tool for Gimp gettext stuff, June 2022
     - !Install [ autopoint ]
 
-    # Packaged valgrind is 3.18, need later for clang14
-    - !Install [ valgrind ]
+    # needed by llvm install
+    - !Install [wget]
+    - !Install [lsb-release ]
+    - !Install [software-properties-common ]
+    - !Install [gnupg]
 
-    # Install valgrind latest
-    # - !TarInstall
-    #  url: https://sourceware.org/pub/valgrind/valgrind-3.20.0.tar.bz2
 
-    # Install clang latest
-    # - !TarInstall
-    #  url: https://github.com/llvm/llvm-project/releases/download/llvmorg-16.0.4/clang+llvm-16.0.4-x86_64-linux-gnu-ubuntu-22.04.tar.xz
 
-    # Install libc w debug for valgrind
-    # - !Install [libc6-dbg]
+  # With installed zig
+  baseWithZig:
+    setup:
+    - !Container baseWithTools
 
-    # yelp-build required for g-ir-doc
-    - !Install [ yelp-tools ]
+    # compiler: zig vs clang versus gcc
+    # - !Install [clang]
+    # Can't use snap in vagga
+    # - !Sh "snap install zig --beta --classic"
 
-    # required for gi-docgen option of gimp build
-    # - !Install [ python-dev-is-python3 ]
-    # - !Py3Install [ gi-docgen ]
-    # - !Py3Install [ python3-gi-docgen ]
-    - !Install [ gi-docgen ]
+    # download and unpack zig
+    - !Tar
+      url: https://ziglang.org/builds/zig-linux-x86_64-0.14.0-dev.112+9be9b8ca9.tar.xz
+      path: /home
+
+    # install zig
+    - !Sh |
+       cp /home/zig-linux-x86_64-0.14.0-dev.112+9be9b8ca9/zig /usr/bin
+       mkdir /usr/lib/zig
+       cp -r /home/zig-linux-x86_64-0.14.0-dev.112+9be9b8ca9/lib /usr/lib/zig
+
+    # export PATH=$PATH:/home/zig-linux-x86_64-0.14.0-dev.112+9be9b8ca9
+
+
+  # With llvm
+  # zig uses
+  baseWithLLVM:
+    setup:
+    - !Container baseWithTools
+
+    # zig wants llvm-config, but Ubuntu packages older
+    #- !Install [llvm-18]
+
+    # install recent llvm
+    - !Sh |
+       # this doesn't get everything
+       # bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
+
+       wget https://apt.llvm.org/llvm.sh
+       chmod +x llvm.sh
+       # ./llvm.sh all
+       # ./llvm.sh lld
+       ./llvm.sh 18 all
+
+       # zig also requires: liblld-18-dev, libclang-18-dev
+       # which the above script does not get, but sets conditions for
+       apt-get --yes install liblld-18-dev
+       apt-get --yes install libclang-18-dev
+
+
+
+
+
+
+  # With built zig
+  # zig dir must exist in work, git it
+  baseWithZigBuilt:
+    setup:
+    - !Container baseWithLLVM
+    # install zig
+    - !Sh |
+       # echo "Making zig"
+       cd /work/zig
+       # mkdir build
+       cd build
+       cmake ..
+       make install
 
 
 
@@ -117,7 +163,7 @@ containers:
 
   gimpDeps:
     setup:
-    - !Container baseWithTools
+    - !Container baseWithZigBuilt
 
     # babl, gegl, GIMP uses glib group of libraries
     # package comprises glib, gobject, and gio
@@ -130,7 +176,7 @@ containers:
     # babl specific
 
     # links against lcms2 (lite color mgt system) library, need the dev flavor
-    - !Install [liblcms2-dev]
+    # - !Install [liblcms2-dev]
 
     # gegl specific
 
@@ -226,7 +272,6 @@ containers:
 
     - !Install [time]
 
-
     # remove DNS file that vagga will recreate after build
     # !!! You must do this last, and not at the beginning of a container build
     - !Sh "rm /etc/resolv.conf"
@@ -257,60 +302,8 @@ containers:
     - !Sh |
        git clone https://gitlab.gnome.org/GNOME/babl.git /home/babl
 
-    # OR most most recent GIMP release archive
-    # 1.72=>1.74=>1.78=>1.84=>1.86
-    # When you change this, also change below the cd
-    #- !Tar
-    #  url: https://download.gimp.org/pub/babl/0.1/babl-0.1.86.tar.xz
-    #  path: /home
-
-    # PR get tarball from babl project, the very latest i.e. master
-    # Fail with "unexpected compression"  https://gitlab.gnome.org/GNOME/babl/repository/archive.tar.gz
-    # Get a specific sha i.e. commit sha256: 69e6b09067f2bbca7ac0dfda0131042d7d1f448c
-    #- !Tar
-    #  url: https://gitlab.gnome.org/GNOME/babl/master/archive.tar.gz
-    #  path: /home
-
-    #- !Git
-    #  url: https://gitlab.gnome.org/GNOME/babl
-    #  path: /home/babl
-    #  revision: 69e6b090
-
-
-
-
-    # Gimp depends on latest gegl which might not be released by gegl.org
-    # i.e. get from gimp.org OR get from gegl.org
-    # !!! If you change this, also change below the cd to the gegl dir, named differently
-
-    # Get from gimp.org
-    #- !Tar
-    #  url: https://download.gimp.org/pub/gegl/0.4/gegl-0.4.18.tar.xz
-    #  url: https://download.gimp.org/pub/gegl/0.4/gegl-0.4.24.tar.xz
-    #  path: /home
-
-    # Get latest, bleeding, from shared, bare repository at gegl.org
-
-    # !!! Must specify a revision, else vagga will, the first time get the latest
-    # !!! and subsequently cache it indefinitely.  See vagga docs.
-    # !!! But you can't get the latest revision until it is released.
-    # So delete contents of the cache ~/.cache/vagga/cache when gegl changes
-    # Or delete the directory ...cache/git
-    # Or specify the revision that GIMP wants
-    #  Fail: revision: 4.27
-    # Only a specific commit seems to work, look it up at gitlab gegl
-
     - !Sh |
        echo "about to git gegl "
-
-    # Fails on SSL certificate expired
-    # 0.4.34
-    #- !Git
-    #  url: https://gitlab.gnome.org/GNOME/gegl
-    #  path: /home/gegl
-    #  revision: 9aaf6b35
-
-    # 0.4.??   revision: 63b8e5f9
 
     - !Sh |
        git clone https://gitlab.gnome.org/GNOME/gegl.git /home/gegl
@@ -360,13 +353,39 @@ containers:
     # -Db_sanitize=address,undefined \
     # -Db_lto=true
 
+    # zig want cpuid?
+    # - !Install [cpuid]
 
     - !Sh |
         cd /home/babl
-        meson _build \
+
+        # setup build
+        # always setup
+        meson setup --wipe _build \
          --buildtype=debug \
           -Dwith-docs=false
+
+        # move to build dir
         cd _build
+
+        #hacky edit to use zig compiler
+        # -i edit file in place
+        # "zig cc" use zig as dropin compiler
+        # no target, should be native
+        # sed -i 's/cc /zig cc /' build.ninja
+        # explicit native
+        sed -i 's/cc /zig cc --target=native /' build.ninja
+        # target arch-OS-ABI
+        # sed -i 's/cc /zig cc --target=x86_64-linux-gnu /' build.ninja
+        # sed -i 's/cc /zig cc --target=x86_64-linux /' build.ninja
+        # sed -i 's/cc /zig cc -Dtarget=x86_64-linux /' build.ninja
+
+        #-DCPU=x86_64
+        #-Dtarget=x86_64
+
+        export PATH=$PATH:/work/zig/build/stage3/bin
+
+        #actual build
         ninja
         ninja install
 
@@ -499,8 +518,8 @@ containers:
 
     - !Sh |
         cd /work/gimp
-        CC=clang CXX=clang meson setup --wipe /work/gimpMesonClangBuild \
-         --buildtype=release \
+        CC=clang CXX=clang meson setup /work/gimpMesonClangBuild \
+         --buildtype=debug \
          -Dpython=enabled \
          -Djavascript=enabled \
          -Dlua=enabled \
@@ -535,72 +554,6 @@ commands:
       cp -rv /work/gimp/plug-ins/script-fu/scripts/test/test9 /work/.home/.config/GIMP/2.99/plug-ins/test9
       cp -rv /work/gimp/plug-ins/script-fu/scripts/test/register-fail /work/.home/.config/GIMP/2.99/plug-ins
       chmod +x /work/.home/.config/GIMP/2.99/plug-ins/register-fail/register-fail.scm
-
-  installMyPluginsToHome: !Command
-    description: Install a set of plugins to .home/.config/GIMP/2.99/plug-ins (seen by all containers)
-    container: gimpMesonDev
-    run: |
-
-      # Copy some plugins from volumes of the container
-
-      echo "Not clearing plugins"
-      #echo "Removing old plugins and gimpfu source"
-      #rm -rf /work/.home/.config/GIMP/2.99/plug-ins/*
-
-      # local plugins in /work/.home/.config/GIMP/2.99/plug-ins
-      # !!! outside the container
-      mkdir /work/.home/.config/GIMP/2.99/plug-ins
-
-      # Refresh installation of gimpfu from development gimp_directory
-      # Copy entire directory
-      echo "Copying gimpfu"
-      cp -rv /work/gimpfu /work/.home/.config/GIMP/2.99/plug-ins
-
-      # Refresh installation of testGIMPPDB
-      echo "Copying testGimpPDB"
-      #mkdir /work/.home/.config/GIMP/2.99/plug-ins/testGimpPDB
-      cp -r /work/testGimpPDB /work/.home/.config/GIMP/2.99/plug-ins
-      chmod +x /work/.home/.config/GIMP/2.99/plug-ins/testGimpPDB/testGimpPDB.py
-
-      echo "Copying selected scriptfu scripts"
-      # cp -rv /work/gimpTestPlugins/scriptFu/testUndefinedFunc.scm /work/.home/.config/GIMP/2.99/scripts
-      #cp -rv /work/gimpTestPlugins/scriptFu/testUndefinedFunc.scm /work/.home/.config/GIMP/2.99/scripts
-      #cp -rv /work/plugins/nonGimpFu/testGeglOp.scm /work/.home/.config/GIMP/2.99/scripts
-      #cp -rv /work/plugins/nonGimpFu/defectsript-v01.scm /work/.home/.config/GIMP/2.99/scripts
-      #cp -r /work/plugins/nonGimpFu/testNumericName.scm   /work/.home/.config/GIMP/2.99/scripts
-
-      #echo "Copying testGimpExportImport"
-      # Copy from a volume of the container
-      #mkdir /work/.home/.config/GIMP/2.99/plug-ins/testGimpExportImport
-      #cp -r /work/testGimpExportImport/* /work/.home/.config/GIMP/2.99/plug-ins/testGimpExportImport
-
-      #echo "Copying testGimpScriptFuBinding"
-      #mkdir /work/.home/.config/GIMP/2.99/plug-ins/testGimpScriptFuBinding
-      #cp -r /work/testGimpScriptFuBinding/* /work/.home/.config/GIMP/2.99/plug-ins/testGimpScriptFuBinding
-
-      #echo "Copying all test plugins"
-      #cp -rv /work/gimpTestPlugins/test/* /work/.home/.config/GIMP/2.99/plug-ins
-      #echo "Copying all my test plugins"
-      #cp -r /work/plugins/test/* /work/.home/.config/GIMP/2.99/plug-ins
-
-      #echo "Copying all wild test plugins"
-      #cp -r /work/plugins/wild/* /work/.home/.config/GIMP/2.99/plug-ins
-      #cp -r /work/plugins/wild/plugin-resynth-tileset /work/.home/.config/GIMP/2.99/plug-ins
-
-      echo "Copying selected test plugins"
-      # copy a directory containing a plugin.py
-      # One of these is WIP
-      #cp -rv /work/gimpTestPlugins/test/dumpPDB /work/.home/.config/GIMP/2.99/plug-ins
-      #cp -rv /work/gimpTestPlugins/test/dump_pdb /work/.home/.config/GIMP/2.99/plug-ins
-
-      #echo "Copying selected nonGimpfu plugins"
-      #cp -r /work/plugins/nonGimpFu/myMinPlugin /work/.home/.config/GIMP/2.99/plug-ins
-      #cp -r /work/plugins/nonGimpFu/testGegl    /work/.home/.config/GIMP/2.99/plug-ins
-
-      #echo "Chmoding test plugins"
-      # find -D exec /work/.home/.config/GIMP/2.99/plug-ins -name *.py -exec chmod +x '{}' + -print
-      #find -D exec /work/.home/.config/GIMP/2.99/plug-ins -type f -name "*.py" -exec chmod +x {} \; -print
-
 
   run: !Command
     description: Build, install, run gimp GUI in gimpMesonDev container
@@ -653,13 +606,13 @@ commands:
       # GIMP_LOG
       # !!! This usurps all other domains
       #export GIMP_DEBUG=menus
-      #export GIMP_DEBUG=all
+      export GIMP_DEBUG=all
 
       #export G_DEBUG=fatal-warnings
-      #export G_DEBUG=fatal-criticals
+      export G_DEBUG=fatal-criticals
 
       #export G_ENABLE_DIAGNOSTIC=1
-      #export GOBJECT_DEBUG=1
+      export GOBJECT_DEBUG=1
 
       #locale -a
 
@@ -725,17 +678,17 @@ commands:
       export GIMP_PLUGIN_DEBUG_WRAPPER=valgrind
 
       # valgrind all
+      # fails ??
       #export GIMP_PLUGIN_DEBUG_WRAP=all
-      #export GIMP_PLUGIN_DEBUG_WRAP=sparkle
+      #export GIMP_PLUGIN_DEBUG_WRAPPER=valgrind
 
       echo "lkk running gimp"
-      # valgrind -s repeats the errors in the summary
       # valgrind --track-origins=yes /usr/local/bin/gimp-2.99 --verbose --stack-trace-mode query
       #/usr/local/bin/gimp-2.99 --verbose --stack-trace-mode query
       #/usr/local/bin/gimp-2.99
       gdb /usr/local/bin/gimp-2.99
       # GTK_DEBUG=interactive /usr/local/bin/gimp-2.99
-      #valgrind -s /usr/local/bin/gimp-2.99
+      #valgrind /usr/local/bin/gimp-2.99
 
       # batch mode
 
@@ -788,39 +741,27 @@ commands:
       pwd
       ./pdbgen.pl lib
 
-  geglFilter: !Command
-    description: build and install gegl filter in gimpMesonDev container
-    container:  gimpMesonDev
-    write-mode: transient-hard-link-copy
+  testzig: !Command
+    description: check zig
+    container:  baseWithZigBuilt
     run: |
-      # Setup env, the container does not do this
-      export LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu:/usr/local/lib
-      export HOME=/work/.home
-      export GIMP_PREFIX=/usr/local
-      export XDG_DATA_DIRS=/usr/local/share:/usr/share
-      export GI_TYPELIB_PATH=/usr/local/lib/x86_64-linux-gnu/girepository-1.0:/usr/local/lib/girepository-1.0
-      export NO_AT_BRIDGE=1
+      export PATH=$PATH:/work/zig/build/stage3/bin
+      echo $PATH
+      which zig
+      zig version
+      zig --help
+      zig cc --help
+      # cpuid
+      # zig targets
 
-
-      echo "lkk meson clang build GIMP"
-      cd /work/gimpMesonClangBuild
-      meson configure /work/gimpMesonClangBuild
-      echo "lkk meson clang compile GIMP"
-      meson compile --verbose -j 12
-      echo "lkk meson clang install GIMP"
-      meson install
-
-      echo "lkk meson clang build gegl filter"
-      cd /work/charcoal
-      CC=clang CXX=clang meson setup --wipe /work/charcoalBuild
-      echo "lkk meson clang compile GIMP"
-      cd /work/charcoalBuild
-      meson compile --verbose -j 12
-      echo "lkk meson clang install charcoal"
-      meson install
-
-      # Install to home/(USERNAME)/.local/share/gegl-0.4/plug-ins
-
-      gdb /usr/local/bin/gimp-2.99
-
+  # This doesn't work in vagga
+  # systemd is not in vagga?
+  # and snap requires it.
+  # vagga doesn't uses daemons?
+  testsnapd: !Command
+    description: check snapd
+    container:  baseOS
+    run: |
+      systemctl start snapd
+      ps -ef | grep snap
 

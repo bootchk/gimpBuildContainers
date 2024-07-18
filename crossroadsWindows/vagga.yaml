@@ -9,8 +9,13 @@ containers:
   # OS with dev (compiling)
   osContainer:
     setup:
-    - !Ubuntu jammy
-    
+    # - !Ubuntu jammy
+    # 23.10
+    - !Ubuntu mantic
+    # 24.04
+    # doesn't work yet
+    #- !Ubuntu noble
+
     # tools for dev (C compiler)
     - !Install [build-essential]
     - !Install [gdb]
@@ -22,14 +27,17 @@ containers:
     - !Install [meson]
     # meson uses pkg-config
     - !Install [pkg-config]
-    
+
     # needed to install crossroad when using Py3Install
     # rst2man
+    # See crossroad requirements.txt
     - !Install [python3-docutils]
+    - !Install [python3-zstandard]
 
     # needed to install crossroad from git clone
     - !Install [git]
     - !Install [python3-pip]
+    - !Install [pipx]
 
     # needed for crossroad to unarchive
     - !Install [cpio]
@@ -37,7 +45,7 @@ containers:
 
     # xsltproc needed by gimp build
     - !Install [xsltproc]
-    
+
 
   # with crossroad tool
   crossroadContainer:
@@ -55,19 +63,27 @@ containers:
         rm -rf crossroad
         git clone git://git.tuxfamily.org/gitroot/crossroad/crossroad.git
         cd crossroad
-        pip3 install -r requirements.txt
+        # pip3 install -r requirements.txt
+        # fails pipx install zstandard
+        # fails, no zstandard pipx install crossroad
+        # pip3 install zstandard
+        pipx install crossroad
+        # fail pipx inject crossroad --requirement requirements.txt
         ./setup.py build && ./setup.py install
 
-  
+
   # with cross for win64
   crossW64Container:
     setup:
     - !Container crossroadContainer
 
     # needed to cross compile to windows
+    # install from distribution
     - !Install [gcc-mingw-w64-x86-64]
     - !Install [binutils-mingw-w64-x86-64]
     - !Install [mingw-w64]
+
+    # install from mingw site
 
     # Build time dependency
     # Not cross compiled, but headers or tools needed at compile time
@@ -80,13 +96,46 @@ containers:
     # zsh work better than bash?
     - !Install [zsh]
 
+    # Don't need this locally, need the mingw package
+    # - !Install [gobject-introspection]
+    # fail - !Install [gobject-introspection-1.0]
+    # - !Install [libgirepository1.0-dev]
+
+
+    - !Sh |
+        # gimp
+        rm -rf gimp
+        git clone https://gitlab.gnome.org/GNOME/gimp.git
+        cd gimp
+        git submodule init
+        git submodule update
+
+    # Larger /tmp  100Mi is default, not enough for cross compile?
+    volumes:
+      /tmp: !Tmpfs { size: 500Mi, mode: 0o1777 }
+
+    environ:
+      HOME: /work/.home
+      SHELL: zsh
+
+
+  # container with source for gimp deps
+  crossW64wDepsContainer:
+    setup:
+    - !Container crossW64Container
+
     # Git source for dependencies
     # Put it outside the container, so we might edit it
     - !Sh |
         cd /work
+
         # babl
         rm -rf babl
-        git clone https://gitlab.gnome.org/GNOME/babl.git
+        # latest
+        # git clone https://gitlab.gnome.org/GNOME/babl.git
+        # tagged
+        git clone --depth 1 --branch BABL_0_1_108 https://gitlab.gnome.org/GNOME/babl.git
+
         # gegl
         rm -rf gegl
         git clone https://gitlab.gnome.org/GNOME/gegl.git
@@ -100,7 +149,7 @@ containers:
     - !Sh |
         cd /work
         patch gegl/gegl/gegl-op.h gegl.patch
-    
+
     # tell crossroad to verify can compile to w64
     - !Sh |
         crossroad -h w64
@@ -113,6 +162,9 @@ containers:
       HOME: /work/.home
       SHELL: zsh
 
+
+
+
 commands:
 
   # run is the conventional name for the primary vagga command.
@@ -123,6 +175,13 @@ commands:
     container:   crossW64Container
     write-mode: transient-hard-link-copy
     run: |
+      # export GI_TYPELIB_PATH=/usr/local/lib/x86_64-linux-gnu/girepository-1.0:/usr/local/lib/girepository-1.0
+      #export GI_TYPELIB_PATH=/work/.home/.local/share/crossroad/roads/w64/gimp-build/lib/girepository-1.0
+      LD_LIBRARY_PATH=/work/.home/.local/share/crossroad/roads/w64/gimp-build/lib
+
+      # Delete the old crossroad env
+      crossroad --reset w64 gimp-build
+
       # Enter the crossroad environment.
       # Note name of project not conflict with name of repo for gimp app
       crossroad --verbose w64 gimp-build << EOF
@@ -140,27 +199,36 @@ commands:
 
       echo " "
       echo "crossroad install dependencies"
+      # see build/windows/all-deps-uni.txt
       crossroad install appstream-glib atk cairo cairo drmingw gexiv2 glib2 graphviz json-c ghostscript iso-codes json-glib libheif lcms2 libjxl
-      crossroad install libmypaint mypaint-brushes libwebp libwmf openexr poppler 
+      crossroad install libmypaint mypaint-brushes libwebp libwmf openexr poppler
+      crossroad install babl gegl
+      crossroad install gobject-introspection gobject-introspection-runtime
+      # girepository-1.0
       # poppler-dataxpm-nox
+      # libm
 
-      echo "build babl"
-      cd babl
-      # build tree is up from source tree
-      crossroad meson ../buildBabl
-      # build in the build tree
-      cd ../buildBabl
-      ninja && ninja install
-      cd ..
+      #echo "build babl"
+      #cd babl
 
-      echo "build gegl"
-      cd gegl
       # build tree is up from source tree
-      crossroad meson ../buildGegl
+      #crossroad meson ../buildBabl
       # build in the build tree
-      cd ../buildGegl
-      ninja -j 8 && ninja install
-      cd ..
+      #cd ../buildBabl
+      #ninja && ninja install
+      #cd ..
+
+      #echo "build gegl"
+      #cd gegl
+      # build tree is up from source tree
+      #crossroad meson ../buildGegl
+      # build in the build tree
+      #cd ../buildGegl
+      #ninja -j 8 && ninja install
+      #cd ..
+
+      # fake gimp-2.99
+      ln -s /usr/bin/cp /usr/bin/gimp-2.99
 
       echo " "
       echo "build gimp"
@@ -168,13 +236,14 @@ commands:
       crossroad meson ../buildGimp
       cd ../buildGimp
       ninja -j 8 && ninja install
-      cd ..
 
-      echo " "
-      echo "Zip gimp"
-      crossroad --compress=gimp-build.zip w64 gimp-build
+      # cd ..
 
-      crossroad --help
+      #echo " "
+      #echo "Zip gimp"
+      #crossroad --compress=gimp-build.zip w64 gimp-build
+
+      #crossroad --help
 
       EOF
 
@@ -219,6 +288,22 @@ commands:
       ps -p $$
       echo "value of $SHELL"
       echo $SHELL
+      echo "gobject-introspection-1.0"
+      whereis gobject-introspection-1.0
+      echo "LD_LIBRARY_PATH" $LD_LIBRARY_PATH
+      # LD_LIBRARY_PATH=/usr/local/lib/x86_64-linux-gnu:/usr/local/lib
+      echo "pkg-config gobject-introspection-1.0"
+      pkg-config -modversion gobject-introspection-1.0
+      echo "find girepo"
+      find / -name girepository-1.0
+      #echo "ls libs"
+      #ls -l /work/.home/.local/share/crossroad/roads/w64/gimp-build/lib
+      echo "find kernel32"
+      find /work -name "*kernel32*"
+      echo "crossroad verify"
+      crossroad -h w64
+      echo "w64 version"
+      x86_64-w64-mingw32-gcc -v
 
 
   sanity2: !Command

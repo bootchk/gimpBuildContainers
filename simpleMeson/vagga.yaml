@@ -290,6 +290,9 @@ commands:
       # suppress dbind errors for accessability
       export NO_AT_BRIDGE=1
 
+      # gimp-data is now a separate repo, built separately
+      git submodule update --init
+
       cd /work/gimpMesonBuild
 
       echo "meson compile and install GIMP"
